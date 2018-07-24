@@ -1,0 +1,141 @@
+library(corrplot)
+library(corrgram)
+library(neuralnet)
+library(ggplot2)
+
+set.seed(12345)
+
+inputdata <- read.csv("ds.csv")
+
+inputdf <- inputdata[c(3:8,11,13,16:17)]
+head(inputdf)
+str(inputdf)
+corrplot(cor(inputdf))
+
+corrgram(inputdf, order=TRUE, lower.panel=panel.shade,upper.panel=panel.pie, text.panel=panel.txt)
+#library(caret)
+index <- sample(1:nrow(inputdf), round(0.2*nrow(inputdf)))
+print(index)
+train <- inputdf[index,]
+test <- inputdf[-index,]
+print(train)
+print(test)
+lm.fit <- glm(loan_status~.,data=train,family=binomial)
+summary(lm.fit)
+
+real.results <- subset(test,select = c(9))
+pr.lm <- predict(lm.fit,test,type = 'response') 
+results <- ifelse(pr.lm >0.5,1,0)
+head(results)
+head(pr.lm)
+
+misclassificationerror <- mean(real.results != results)
+print(paste('Accuracy',1-misclassificationerror))
+
+
+#confusionMatrix(data = results,reference = real.results$loan_status,20)
+MSE.lm <- sum((pr.lm - test$loan_status) ^2/nrow(test))
+set.seed(456)
+maxs <- apply(inputdf,2,max)
+mins <- apply(inputdf,2,min)
+
+scaled <- as.data.frame(scale(inputdf, center = mins, scale = maxs-mins))
+
+train2 <- scaled[index,]
+test2 <- scaled[-index,]
+
+n<-names(train2)
+f <- as.formula(paste("loan_status~",paste(n[!n %in% "loan_status"],collapse = "+")))
+nn <- neuralnet(f, data=train2,hidden = 7,linear.output = F,stepmax = 1000000)
+
+plot(nn)
+
+print(nn)
+nn.bp <- neuralnet(f,data = test2,hidden = 7,err.fct = "ce",linear.output = FALSE,algorithm = "backprop",learningrate = 0.01)
+plot(nn.bp)
+nn.bp$result.matrix
+out <- cbind(nn$covariate, nn$net.result[[1]])
+dimnames(out) <- list(NULL,c("loan_amnt", "funded_amnt", "funded_amnt_inv", "term", "int_rate", "installment", "emp_length", "annual_inc", "application_type","nn-output"))
+head(out)
+testSet_Features = subset(test2,select=c("loan_amnt", "funded_amnt", "funded_amnt_inv", "term", "int_rate", "installment", "emp_length", "annual_inc", "application_type"));
+
+head(testSet_Features)
+NNresults = compute(nn,testSet_Features );
+#print(nrow(NNresults$net.result),nrow(test2$loan_status))
+finalOutput = data.frame(Actual = test2$loan_status,
+                         Prediction = NNresults$net.result,
+                         Matches = doesPredictionMatch(test2$loan_status, NNresults$net.result, 0.3));
+
+row.names(finalOutput) = NULL;
+
+print(cat("Prediction Success Rate : ",countSuccessPercent(finalOutput$Matches)));
+
+print(finalOutput)
+
+
+doesPredictionMatch = function(expected = Null, predicted = Null, threshold = 0.3){
+  if(is.null(expected) || is.null(predicted)){
+    print("Necessary arguments missing or null");
+    stop();
+  }
+  
+  results = rep(FALSE,length(expected));
+  
+  for(i in 1:length(expected)){
+    if((!is.na(expected[i]))&&(!is.na(predicted[i]))){  
+      if(abs(expected[i]-predicted[i])<threshold ){
+        results[i] = TRUE;
+      }
+    }
+    
+  }
+  return (results);
+}
+countSuccessPercent = function(input = NULL){
+  count= 0;
+  for(i in 1:length(input)){
+    tmp =as.logical(input[i]); 
+    if(is.logical(tmp) && tmp ==TRUE ){
+      count=count+1;
+    }
+  }
+  return ((count/length(input))*100);  
+}
+
+
+pr.nn_ <- NNresults$net.result*(max(inputdf$loan_status)-min(inputdf$loan_status))+min(inputdf$loan_status)
+test.r <- (test2$loan_status)*(max(inputdf$loan_status)-min(inputdf$loan_status))+min(inputdf$loan_status)
+
+MSE.nn <- sum((test.r - pr.nn_)^2)/nrow(test2)
+
+print(paste(MSE.lm,MSE.nn))
+
+
+par(mfrow=c(1,2))
+
+plot(test2$loan_status,pr.nn_,col='red',main='Real vs predicted NN',pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend='NN',pch=18,col='red', bty='n')
+
+plot(test$loan_status,pr.lm,col='blue',main='Real vs predicted lm',pch=18, cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend='LM',pch=18,col='blue', bty='n', cex=.95)
+
+
+
+plot(test$loan_status,pr.nn_,col='red',main='Real vs predicted NN',pch=18,cex=0.7)
+points(test2$loan_status,pr.lm,col='blue',pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend=c('NN','LM'),pch=18,col=c('red','blue'))
+par(mfrow=c(2,2))
+gwplot(nn,selected.covariate="loan_amnt",min=-2.5, max=5,col="blue")
+gwplot(nn,selected.covariate="funded_amnt",min=-2.5, max=5,col="blue")
+gwplot(nn,selected.covariate="funded_amnt_inv",min=-2.5, max=5,col="blue")
+gwplot(nn,selected.covariate="term",min=-2.5, max=5,col="blue")
+gwplot(nn,selected.covariate="int_rate", min=-2.5, max=5,col="blue")
+gwplot(nn,selected.covariate="installment", min=-2.5, max=5,col="blue")
+gwplot(nn,selected.covariate="emp_length", min=-2.5, max=5,col="blue")
+gwplot(nn,selected.covariate="annual_inc", min=-2.5, max=5,col="blue")
+gwplot(nn,selected.covariate="application_type", min=-2.5, max=5,col="blue")
+corrplot(cor(inputdf))
+corrgram(inputdf, order=TRUE, lower.panel=panel.shade,upper.panel=panel.pie, text.panel=panel.txt)
